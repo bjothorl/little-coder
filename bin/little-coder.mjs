@@ -131,15 +131,30 @@ if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
   process.env.PI_SKIP_VERSION_CHECK = "1";
 }
 
-// ---- 8. Force pi's global quietStartup so the loaded-resources block stays hidden ----
-// Pi's interactive mode dumps an [Extensions] / [Skills] / [Prompts] block on
-// every launch unless `quietStartup: true` is set in its global settings
-// (~/.pi/agent/settings.json). Our shipped .pi/settings.json doesn't reach pi
-// because pi reads from <cwd>/.pi/settings.json (project) or <agentDir>/settings.json
-// (global), neither of which is our npm-installed package dir. So the launcher
-// non-destructively merges quietStartup: true into the user's actual global
-// settings file. Existing keys are preserved. To see the full inventory, run
-// `little-coder --verbose` — pi's verbose flag overrides quietStartup.
+// ---- 8. Force pi's global quietStartup + pin lastChangelogVersion ----
+// Two non-destructive merges into ~/.pi/agent/settings.json (or the dir pointed
+// to by PI_CODING_AGENT_DIR):
+//
+//   1. quietStartup: true
+//        Pi's interactive mode otherwise dumps an [Extensions] / [Skills] /
+//        [Prompts] inventory on every launch. Pi reads global settings from
+//        <agentDir>/settings.json — NOT from our npm-installed package dir —
+//        so our shipped .pi/settings.json doesn't reach it. To see the
+//        inventory anyway, run `little-coder --verbose`.
+//
+//   2. lastChangelogVersion: <currently installed pi version>
+//        Pi reads its own bundled CHANGELOG.md on startup and renders a
+//        "What's New" block for every entry strictly newer than this stored
+//        version (interactive-mode.js:getChangelogForDisplay). That makes pi's
+//        upstream changelog show up inside little-coder's TUI every time we
+//        bump the bundled pi dep — which is jarring because little-coder is
+//        the surface, not pi. We pre-stamp this field to the version we just
+//        bundled BEFORE pi starts, so pi sees "user already saw this", and
+//        the block never renders. Users who genuinely want to read pi's
+//        upstream changelog can still do so with `/changelog` inside the TUI.
+//
+// Existing keys are preserved. We only write when the desired value differs
+// from what's already on disk, so this is a no-op on warm launches.
 try {
   const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
   let agentDir;
@@ -164,8 +179,32 @@ try {
       globalSettings = {};
     }
   }
+
+  // Read the bundled pi version. We resolve via the same package.json we used
+  // to find piEntry, so this stays consistent with whichever pi we actually
+  // spawn — no second source of truth.
+  let bundledPiVersion;
+  try {
+    const piPkgJson = JSON.parse(
+      readFileSync(join(piPkgRoot, "package.json"), "utf-8"),
+    );
+    if (typeof piPkgJson?.version === "string") bundledPiVersion = piPkgJson.version;
+  } catch {
+    // If we can't read pi's version, fall back to leaving lastChangelogVersion
+    // alone — pi will then show its own changelog on the next launch. Better
+    // than writing garbage into the user's settings.
+  }
+
+  let mutated = false;
   if (globalSettings.quietStartup !== true) {
     globalSettings.quietStartup = true;
+    mutated = true;
+  }
+  if (bundledPiVersion && globalSettings.lastChangelogVersion !== bundledPiVersion) {
+    globalSettings.lastChangelogVersion = bundledPiVersion;
+    mutated = true;
+  }
+  if (mutated) {
     writeFileSync(globalSettingsPath, JSON.stringify(globalSettings, null, 2));
   }
 } catch {
