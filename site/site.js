@@ -327,7 +327,7 @@
 
     const TAILS = [
       'for small models',
-      'for tending to your medical documents',
+      'for tending to your personal documents',
       'for when you hit Claude Code’s limit',
     ];
     const DWELL = 5000; // each phrase stays readable ~5s before it changes
