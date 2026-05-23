@@ -2,6 +2,21 @@
 
 All notable changes to little-coder are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and little-coder's public interface (CLI, providers, tools, skills) follows semver starting at `v0.0.1` post-rename.
 
+## [v1.8.0] — 2026-05-23
+
+little-coder now **auto-detects the llama.cpp server's live context window** at startup and registers the model with it, so a `llama-server -c 131072` shows 128k instead of the declared default — no config edit. This completes [v1.7.0](#v170--2026-05-23): the budget already *followed* the registered window; now the registered window itself comes from the running server.
+
+### Added
+- **Live context-window detection for llama.cpp.** On startup `llama-cpp-provider` GETs the server's `/props` endpoint, reads its actual `n_ctx`, and registers the model with that window in place of the static `contextWindow` in `models.json`. The TUI context readout, read-guard's overflow trim, and the skill/knowledge budgets all then track the server's real window — bump `llama-server -c` and little-coder follows, no `models.json` or settings edit. The `/props` URL is derived from the provider baseUrl by stripping `/v1` (llama-server serves it at the root); the value is read from `default_generation_settings.n_ctx`. New tested helpers `propsUrlFor` / `contextWindowFromProps` / `probeContextWindow`, validated end-to-end against a live `-c 131072` server (→ 131072).
+  - **Best-effort and safe:** 1.5 s timeout, `llamacpp` provider only, and ANY failure (server down, no `/props`, non-JSON, timeout) silently falls back to the declared window — startup is never blocked or broken.
+  - **Env knobs:** `LITTLE_CODER_NO_CTX_PROBE=1` disables the probe (offline / CI); `LITTLE_CODER_LLAMACPP_PROPS_URL` overrides the `/props` URL for non-standard setups; `LITTLE_CODER_CTX_PROBE_TIMEOUT_MS` tunes the timeout.
+
+### Notes for upgraders
+- This adds one best-effort HTTP GET to the llama.cpp `/props` endpoint at launch (only for the `llamacpp` provider). If your server/proxy doesn't expose `/props`, behaviour is unchanged — the declared `models.json` `contextWindow` (default 32768) is used. Set `LITTLE_CODER_NO_CTX_PROBE=1` to skip the probe entirely.
+- No CLI-flag or public-API changes.
+
+---
+
 ## [v1.7.0] — 2026-05-23
 
 little-coder's context budget now follows the model's **live registered context window** instead of a hardcoded 32 768. Whatever window your provider declares for the active model (`contextWindow` in `models.json`, user-overridable) is what the whole harness budgets against — bump the model once and the TUI's context readout, read-guard's overflow trim, and the skill/knowledge-injection budgets all move together. This closes the common report: *"I bumped llama.cpp to 128k but little-coder still says 33k."*
